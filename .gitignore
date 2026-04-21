@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.pyc
+.cache/
+
+# Env
+.env
+
+# Test files (separate files)
+test_api.py
+test_llm.py
+test_font.py
+test_pipeline.py
+
+# Optional
+.paddlex/git rm --cached test_*.py
