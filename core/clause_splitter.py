@@ -1,6 +1,5 @@
 import re
 
-
 class ClauseSplitter:
 
     @staticmethod
@@ -11,8 +10,13 @@ class ClauseSplitter:
         # Normalize spacing
         text = re.sub(r'\s+', ' ', text).strip()
 
-        # 🔥 Better splitting
+        # Primary split (sentence based)
         clauses = re.split(r'(?<=[।.!?])\s+', text)
 
+        clauses = [c.strip() for c in clauses if len(c.strip()) > 30]
 
-        return [c.strip() for c in clauses if len(c.strip()) > 30]
+        # ✅ Controlled fallback (only if nothing found)
+        if not clauses:
+            return [text[:500]]
+
+        return clauses

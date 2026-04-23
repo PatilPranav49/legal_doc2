@@ -42,32 +42,39 @@ class DocumentExtractor:
         elif ext == ".pdf":
             res = extract_pdf_text(file_path)
 
+            # DEBUG
+            print("DEBUG PDF TEXT LENGTH:", len(res.get("text", "")))
+            print("DEBUG likely_scanned:", res.get("likely_scanned"))
+
             if res.get("likely_scanned", False):
                 try:
                     from pdf2image import convert_from_path
                     import pytesseract
-                    from PIL import Image
 
-                    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-                    poppler_path = r"C:\poppler\poppler-25.12.0\Library\bin"
+                    print("DEBUG: Entering OCR block")
 
-                    images = convert_from_path(
-                        file_path,
-                        dpi=300,
-                        poppler_path=poppler_path
-                    )
+                    images = convert_from_path(file_path, dpi=300)
+
+                    print("DEBUG: Pages converted:", len(images))
 
                     full_text = ""
-                    for img in images:
+                    for i, img in enumerate(images):
                         text = pytesseract.image_to_string(
                             img,
-                            lang="mar+hin+eng",
+                            lang="eng",   # keep simple for stability
                             config="--oem 3 --psm 3"
                         )
+                        print(f"DEBUG OCR page {i+1} length:", len(text))
                         full_text += text + "\n"
 
+                    full_text = full_text.strip()
+
+                    # 🔥 CRITICAL FIX
+                    if not full_text:
+                        return self._error("OCR returned empty text")
+
                     return {
-                        "text": full_text.strip(),
+                        "text": full_text,
                         "pages": len(images),
                         "success": True,
                         "likely_scanned": True,
@@ -76,7 +83,11 @@ class DocumentExtractor:
                     }
 
                 except Exception as e:
-                    return self._error(str(e))
+                    return self._error(f"OCR failed: {str(e)}")
+
+            # 🔥 ADD THIS CHECK ALSO
+            if not res.get("text", "").strip():
+                return self._error("PDF extraction returned empty text")
 
             return res
         

@@ -70,6 +70,8 @@ class LegalDocPipeline:
             return self._error_result(filename, extraction.get("error", "Extraction failed"))
 
         raw_text = extraction.get("text", "") or ""
+        if not raw_text.strip():
+                return self._error_result(filename, "No text could be extracted from document")
         raw_text = raw_text.replace("Sasstam", "System")
         extraction_method = extraction.get("extraction_method", "unknown")
         page_count = extraction.get("pages", 1)
@@ -103,25 +105,37 @@ class LegalDocPipeline:
         show_risk = is_risk_relevant(doc_type)
         
 
-        if raw_text.strip():
+        if raw_text and len(raw_text.strip()) > 20:
             try:
-                original_clauses = ClauseSplitter.split(raw_text)
+                clean_text = " ".join(raw_text.split())
 
-                for idx, clause in enumerate(original_clauses[:3]):
-                    
-                    if not show_risk:
+                original_clauses = ClauseSplitter.split(clean_text)
 
-                        simple_prompt = f"""
-                    Simplify the following text for a normal Indian citizen, avoiding technical or legal terms:
+                filtered_clauses = [
+                    c.strip() for c in original_clauses if len(c.strip()) >= 30
+                ]
 
-                    {clause}
-                    """
+                if not filtered_clauses:
+                    filtered_clauses = [clean_text[:500]]
+                                # debug point
+                print("SAFE TEXT LENGTH:", len(safe_text))
+                print("CLAUSES COUNT:", len(original_clauses))
+                print("FILTERED CLAUSES:", len(filtered_clauses))
+                # debug point
 
-                        response = self.llm._call_llm(simple_prompt)
 
-                        explanation = response if response else f"This means {clause.lower()}"
+                batch_explanations = self.llm.explain_clauses_batch(filtered_clauses)
 
-                        legal_context.append({
+
+                for idx, clause in enumerate(filtered_clauses):
+
+                    explanation = (
+                                    batch_explanations[idx]
+                                    if idx < len(batch_explanations)
+                                    else "General information"
+)
+
+                    legal_context.append({
                             "clause_id": idx + 1,
                             "original_clause": clause,
                             "english_clause": clause,
@@ -130,62 +144,12 @@ class LegalDocPipeline:
                             "type": "General"
                         })
 
-                        continue
-                    # ✅ NEW: skip noisy OCR clauses
-                    if sum(c.isalpha() for c in clause) < 20:
-                        continue
+                      
                     
-                    if len(clause.split()) < 5:
-                        continue
+                        
+                        
 
-                    if "@" in clause or "mobile" in clause.lower():
-                        continue
-                    try:
-                        # 🔹 Translate per clause
-                        english_clause = self.translator.translate_to_english(clause)
-                        if not english_clause or not english_clause.strip():
-                            english_clause = clause
-                        english_clause = self.redactor.restore(english_clause, pii_result)
-
-                        # 🔹 Retrieve using English clause
-                        context = self.retriever.retrieve(english_clause[:300])
-                        context = context[:2] 
-
-                        if not context:
-                            context = [{"note": "No relevant legal section found"}]
-
-                        # 🔹 LLM processing
-                        llm_result = self.llm.explain_clause(
-                            original=clause,
-                            english=english_clause,
-                            context=context
-                        )
-
-                        llm_result["risk"] = self.adjust_risk(english_clause)
-
-                        legal_context.append({
-                            "clause_id": idx + 1,
-                            "original_clause": clause,
-                            "english_clause": english_clause,
-                            "context": context,
-                            "explanation": llm_result.get("explanation", ""),
-                            "risk": llm_result.get("risk", "Unknown"),
-                            "type": llm_result.get("type", "Unknown")
-                        })
-
-                    except Exception as e:
-                        logger.error(f"Clause error: {e}")
-
-                        legal_context.append({
-                            "clause_id": idx + 1,
-                            "original_clause": clause,
-                            "english_clause": "",
-                            "context": [],
-                            "explanation": "Processing failed",
-                            "risk": "Unknown",
-                            "type": "Unknown",
-                            "error": str(e)
-                        })
+                   
 
             except Exception as e:
                 logger.error(f"Clause pipeline error: {e}")
@@ -196,6 +160,9 @@ class LegalDocPipeline:
         for clause in legal_context:
             if not show_risk:
                 clause.pop("risk", None)
+        
+        if not raw_text.strip():
+            raw_text = safe_text
 
         result = {
             "document_type":     doc_type,        
@@ -278,3 +245,4 @@ class LegalDocPipeline:
             return "Medium"
 
         return "Low"
+        
